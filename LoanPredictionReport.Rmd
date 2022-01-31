@@ -1,0 +1,627 @@
+---
+title: "Loan Prediction Project"
+author: "George Moisescu"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+In this project I will try to use 6 machine learnig algorithm for predicting which individuals included in the test set database will have or will not have access to credit.
+I will use the data from Kaggle platform: https://www.kaggle.com/altruistdelhite04/loan-prediction-problem-dataset
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(scales)) install.packages("scales", repos = "http://cran.us.r-project.org")
+if(!require(dslabs)) install.packages("dslabs", repos = "http://cran.us.r-project.org")
+
+
+library(tidyverse)
+library(dslabs)
+library(caret)
+library(scales)
+
+loan_data <- read.csv("https://raw.githubusercontent.com/GeorgeMoisescu/ChooseYourOwn/main/train_loan.csv")
+
+```
+
+
+```{r,message=FALSE, warning=FALSE}
+
+
+head(loan_data,4)
+str(loan_data)
+
+```
+
+The dataset contain 614 observations in 13 variables.
+I will drop the Loan_ID variable because it is not useful for building the prediction algorithm .
+
+## Describing the variables
+
+1. Gender:            the gender of applicant(male or female)
+2. Married:           if the applicant is married or single
+3. Dependents:        the number of dependents the applicant have(0,1,2,3+)
+4. Education:         the studies of the applicant(Graduate or Not Graduate)
+5. Self_Employed:     if the applicant is employed or self_employed
+6. ApplicantIncome:   integer variable who tell us the applicant income
+7. CoapplicantIncome: numeric variable who tell us the coapplicant income
+8. LoanAmount:        the amount of the loan
+9. Loan_Amount_Term:  the period in which the loan is given
+10. Credit_History:   if the applicant has history credit
+11. Property_Area:    the place where the property of the applicant is situated
+12: Loan_Status:      status of the application.
+
+# Exploratory Data Analysis
+
+As we can see the type of variables are character, integer and numeric. I will transform the data into factors and integer.
+
+```{r,message=FALSE, warning=FALSE}
+
+loan_data$Gender <- as.factor(loan_data$Gender)
+loan_data$Married <- as.factor(loan_data$Married)
+loan_data$Dependents <- as.factor(loan_data$Dependents)
+loan_data$Education <- as.factor(loan_data$Education)
+loan_data$Self_Employed <- as.factor(loan_data$Self_Employed)
+loan_data$CoapplicantIncome <- as.integer(loan_data$CoapplicantIncome)
+loan_data$Credit_History <- as.factor(loan_data$Credit_History)
+loan_data$Property_Area <- as.factor(loan_data$Property_Area)
+loan_data$Loan_Status <- as.factor(loan_data$Loan_Status)
+loan_data$Loan_Amount_Term <- as.factor(loan_data$Loan_Amount_Term)
+```
+
+Summarising the dataset:
+
+```{r,message=FALSE, warning=FALSE}
+summary(loan_data)
+```
+
+There are missing values in the Gender, Married, Dependents, Self_Employed, Credit_History variables.
+
+## Dealing with the missing values in the loan_data
+
+### Gender variable
+
+```{r,message=FALSE, warning=FALSE}
+gender_data <- loan_data %>% filter(Gender != "") %>% group_by(Gender) %>% 
+          summarize(n = n()) %>% mutate(percentage = round(n/sum(n),digits = 2))
+gender_data
+```
+We have 19% female applicants and 81% male applicants
+
+```{r,message=FALSE, warning=FALSE}
+missing <- loan_data %>% filter(Gender == "")
+nrow(missing)
+```
+We have 13 applicants with no value for Gender.
+19% of 13 is 2. I will fill 2 of 13 with female and 11 of 13 with male
+
+```{r,message=FALSE, warning=FALSE}
+gender_index <- which(loan_data$Gender == "")
+gender_index
+
+loan_data$Gender[c(172,461)] <- "Female"
+
+gender_index_male <-setdiff(gender_index,c(172,461))
+gender_index_male
+
+for (i in gender_index_male) {
+  loan_data$Gender[i] <- "Male"
+}
+
+loan_data$Gender <- droplevels(loan_data$Gender)
+summary(loan_data$Gender)
+levels(loan_data$Gender)
+```
+###  Married variable
+
+```{r,message=FALSE, warning=FALSE}
+married_data <- loan_data %>% filter(Married != "") %>% group_by(Married) %>%
+          summarize(n = n()) %>% mutate(percentage = round(n/sum(n),digits = 2))
+married_data
+```
+We have 65% married applicants and 35% single applicants
+
+```{r,message=FALSE, warning=FALSE}
+summary(loan_data$Married)
+```
+We have 3 missing values.
+```{r,message=FALSE, warning=FALSE}
+married_index <- which(loan_data$Married == "")
+married_index
+
+round(0.65 * length(married_index))
+```
+I will fill 2 observations with "Yes" and one with "No"
+
+```{r,message=FALSE, warning=FALSE}
+loan_data$Married[c(105,229)] <- "Yes"
+loan_data$Married[c(436)] <- "No"
+
+loan_data$Married <- droplevels(loan_data$Married)
+summary(loan_data$Married)
+```
+### Dependents variable
+
+
+```{r,message=FALSE, warning=FALSE}
+summary(loan_data$Dependents)
+dependents_data <- loan_data %>% filter(Dependents != "") %>% 
+                    group_by(Dependents) %>% summarize(n = n()) %>%
+                    mutate(percentage = round(n/sum(n),digits = 2))
+dependents_data
+```
+We have 58% applicants with no dependent, 17% with 1 dependent, 17% with 2 dependents and 9% with 3 or more dependents
+We have 15 applicants with no value for Dependents.
+
+```{r,message=FALSE, warning=FALSE}
+dependents_index <- which(loan_data$Dependents == "")
+dependents_index
+
+round(0.58 * length(dependents_index))
+```
+
+I will fill 9 observation with 0, 3 observations with 1 and 3 with 2.
+
+```{r,message=FALSE, warning=FALSE}
+loan_data$Dependents[c(103,227,229,302,336,356,436,572,598)] <- 0
+
+round(0.17 * length(dependents_index))
+loan_data$Dependents[c(105,121,294)] <- 1
+loan_data$Dependents[c(333,347,518)] <- 2
+```
+
+```{r,message=FALSE, warning=FALSE}
+loan_data$Dependents <- droplevels(loan_data$Dependents)
+summary(loan_data$Dependents)
+```
+
+### Self_Employed variable
+
+```{r,message=FALSE, warning=FALSE}
+summary(loan_data$Self_Employed)
+selfemp_data <- loan_data %>% filter(Self_Employed != "") %>% group_by(Self_Employed) %>% summarize(n = n(), avg_income = mean(ApplicantIncome)) %>% mutate(percentage = round(n/sum(n),digits = 2))
+selfemp_data
+```
+We have 86% applicants who are not self_employed and 14% who are self_employed
+The average income for self_employed applicant is 7381 and for those who employed is 5050
+We have 32 applicants with no value for Self_Employed.
+
+
+```{r,message=FALSE, warning=FALSE}
+selfemp_index <- which(loan_data$Self_Employed == "")
+selfemp_index
+
+loan_data$ApplicantIncome[selfemp_index]
+
+round(0.14 * length(selfemp_index))
+```
+We choose 4 applicant out of 32 with income close to average income of the category.
+
+```{r,message=FALSE, warning=FALSE}
+loan_data$Self_Employed[c(96,108,334,433)] <- "Yes"
+```
+
+The rest of 28 observation I fill with "No"
+
+```{r,message=FALSE, warning=FALSE}
+selfemp_index_no <-setdiff(selfemp_index,c(96,108,334,433))
+selfemp_index_no
+
+for (i in selfemp_index_no) {
+  loan_data$Self_Employed[i] <- "No"
+}
+
+loan_data$Self_Employed <- droplevels(loan_data$Self_Employed)
+summary(loan_data$Self_Employed)
+```
+
+### LoanAmount variable
+
+```{r,message=FALSE, warning=FALSE}
+loan_data %>% filter(!is.na(LoanAmount)) %>% ggplot(aes(LoanAmount)) + 
+      geom_histogram(bins = 20) + ggtitle("LoanAmount distribution in dataset")
+summary(loan_data$LoanAmount)
+```
+The distribution is right skewed and we have missing values. I will fill the NA values with median value.
+```{r,message=FALSE, warning=FALSE}
+median(loan_data$LoanAmount,na.rm = TRUE)
+loan_data$LoanAmount[is.na(loan_data$LoanAmount)] <- 
+                                      median(loan_data$LoanAmount,na.rm = TRUE)
+```
+
+### Loan_Amount_Term variable
+
+```{r,message=FALSE, warning=FALSE}
+loanamountterm_data <- loan_data %>% filter(!is.na(Loan_Amount_Term)) %>% 
+                    group_by(Loan_Amount_Term) %>% summarize(n = n()) %>% 
+                    mutate(percentage = round(n/sum(n),digits = 2))
+loanamountterm_data
+```
+I am going to fill the NA's based on the proportion of each category.
+
+```{r,message=FALSE, warning=FALSE}
+loan_data %>% filter(is.na(Loan_Amount_Term)) %>%nrow()
+
+loanamountterm_index <- which(is.na(loan_data$Loan_Amount_Term))
+loanamountterm_index
+
+round(0.85 * 14)
+loan_data$Loan_Amount_Term[c(20,37,45,46,74,113,166,198,224,233,336,368)] <- 360
+
+round(0.07 * 14)
+
+loan_data$Loan_Amount_Term[422] <- 180
+loan_data$Loan_Amount_Term[424] <- 480
+```
+I filled 12 of 14 observations with 360, 1 observation with 180 and 1 with 480
+
+
+```{r,message=FALSE, warning=FALSE}
+summary(loan_data$Loan_Amount_Term)
+```
+### Credit_History variable
+
+```{r,message=FALSE, warning=FALSE}
+summary(loan_data$Credit_History)
+credithistory_data <- loan_data %>% filter(!is.na(Credit_History)) %>%
+                      group_by(Credit_History) %>% summarize(n = n()) %>% 
+                      mutate(percentage = round(n/sum(n),digits = 2))
+credithistory_data
+```
+
+We have 50 observations with missing values, 16% of applicants witch don't have credit history and 84% of applicant witch have credit history.
+I will fill the NA values based on proportion of each category.
+```{r,message=FALSE, warning=FALSE}
+credithistory_index <- which(is.na(loan_data$Credit_History))
+credithistory_index
+
+round(0.16 * 50)
+
+credithistory_index_no <- c(17,43,96,130,220,260,318,393)
+loan_data$Credit_History[credithistory_index_no] <- 0
+
+credithistory_index_yes <- setdiff(credithistory_index,credithistory_index_no)
+credithistory_index_yes
+
+for (i in credithistory_index_yes) {
+  loan_data$Credit_History[i] <- 1
+}
+
+```
+
+```{r,message=FALSE, warning=FALSE}
+loan_data <- loan_data[,-1]
+```
+
+## Dealing with outliers
+
+I use Tukey's definition of an outlier
+
+### Removing outliers for ApplicantIncome
+
+```{r,message=FALSE, warning=FALSE}
+loan_data %>% ggplot(aes(ApplicantIncome)) + geom_histogram(bins = 20)
+summary(loan_data$ApplicantIncome)
+```
+
+I will keep the values witch are between lower and higher values.
+
+```{r,message=FALSE, warning=FALSE}
+cutt_off <- 1.5 * IQR(loan_data$ApplicantIncome)
+cutt_off
+lower_value <- quantile(loan_data$ApplicantIncome,0.25) - cutt_off
+higher_Value <- quantile(loan_data$ApplicantIncome,0.75) + cutt_off
+lower_value
+higher_Value
+
+appinc_dropindex <- which(loan_data$ApplicantIncome > higher_Value)
+appinc_dropindex
+
+loan_data <- loan_data[-appinc_dropindex,]
+loan_data %>% ggplot(aes(ApplicantIncome)) + geom_histogram(bins = 20)
+```
+### Removing outliers for CoapplicantIncome
+
+```{r,message=FALSE, warning=FALSE}
+loan_data %>% ggplot(aes(CoapplicantIncome)) + geom_histogram(bins = 20)
+summary(loan_data$CoapplicantIncome)
+```
+I will keep the values witch are between lower and higher values.
+
+```{r,message=FALSE, warning=FALSE}
+cutt_off <- 1.5 * IQR(loan_data$CoapplicantIncome)
+cutt_off
+lower_value <- quantile(loan_data$CoapplicantIncome,0.25) - cutt_off
+higher_Value <- quantile(loan_data$CoapplicantIncome,0.75) + cutt_off
+lower_value
+higher_Value
+coappinc_dropindex <- which(loan_data$CoapplicantIncome > higher_Value)
+coappinc_dropindex
+loan_data <- loan_data[-coappinc_dropindex,]
+loan_data %>% ggplot(aes(CoapplicantIncome)) + geom_histogram(bins = 20)
+```
+
+## Grouping the ApplicantIncome and CoapplicantIncome
+
+I will group the ApplicantIncome and CoapplicantIncome in a single variable TotalIncome.
+
+```{r,message=FALSE, warning=FALSE}
+loan_data <- loan_data %>% mutate(TotalIncome = ApplicantIncome + CoapplicantIncome)
+loan_data <- loan_data[,-c(6,7)]
+loan_data <- loan_data[,c(1:9,11,10)]
+```
+
+
+## Data Visualisation
+
+```{r,message=FALSE, warning=FALSE}
+loan_data %>% ggplot(aes(Gender, fill = Loan_Status)) + 
+                          geom_bar(position=position_dodge()) + 
+                          ggtitle("Gender Distribution with Status of the Loan")
+```
+
+```{r,message=FALSE, warning=FALSE}
+loan_data %>% ggplot(aes(Married, fill = Loan_Status)) + 
+                        geom_bar(position=position_dodge()) + 
+                        ggtitle("Married Distribution with Status of the Loan")
+```
+
+```{r,message=FALSE, warning=FALSE}
+loan_data %>% ggplot(aes(Dependents, fill = Loan_Status)) +
+                      geom_bar(position=position_dodge()) + 
+                      ggtitle("Dependents Distribution with Status of the Loan")
+```
+
+```{r,message=FALSE, warning=FALSE}
+loan_data %>% ggplot(aes(Education, fill = Loan_Status)) + 
+                    geom_bar(position=position_dodge()) +
+                    ggtitle("Education Distribution with Status of the Loan")
+```
+
+```{r,message=FALSE, warning=FALSE}
+loan_data %>% ggplot(aes(Self_Employed, fill = Loan_Status)) + 
+                  geom_bar(position=position_dodge()) + 
+                  ggtitle("Self Employed Distribution with Status of the Loan")
+```
+
+```{r,message=FALSE, warning=FALSE}
+loan_data %>% ggplot(aes(TotalIncome,LoanAmount, color = Loan_Status)) + 
+          geom_point() + ggtitle("Variation of LoanAmount with ApplicantIncome")
+```
+
+```{r,message=FALSE, warning=FALSE}
+loan_data %>% ggplot(aes(Loan_Amount_Term, fill = Loan_Status)) +
+                geom_bar(position=position_dodge()) + 
+                ggtitle("Loan Amount Term Distribution with Status of the Loan")
+```
+
+```{r,message=FALSE, warning=FALSE}
+loan_data %>% ggplot(aes(Credit_History, fill = Loan_Status)) + 
+                geom_bar(position=position_dodge()) +
+                ggtitle("Credit History Distribution with Status of the Loan")
+```
+
+```{r,message=FALSE, warning=FALSE}
+loan_data %>% ggplot(aes(Property_Area, fill = Loan_Status)) +
+                geom_bar(position=position_dodge()) + 
+                ggtitle("Property Area Distribution with Status of the Loan")
+```
+
+## Scaling the data
+
+I will transform the TotalIncome variable so that it will fit into the scale of 0-1
+
+```{r,message=FALSE, warning=FALSE}
+loan_data$TotalIncome <- (loan_data$TotalIncome - min(loan_data$TotalIncome)) /
+                      (max(loan_data$TotalIncome) - min(loan_data$TotalIncome))
+```
+
+```{r,message=FALSE, warning=FALSE}
+summary(loan_data$TotalIncome)
+```
+
+## Features encoding
+
+I will convert categorical data into numbers because it lead us to a better model and most of the algorithm cannot handle categorical data.
+
+
+```{r,message=FALSE, warning=FALSE}
+loan_data$Gender <- ifelse(loan_data$Gender == "Male",1,0)
+loan_data$Married <- ifelse(loan_data$Married == "Yes",1,0)
+
+
+loan_data$Dependents <- as.integer(loan_data$Dependents)
+
+indexs <- which(loan_data$Dependents == 1)
+loan_data$Dependents[indexs] <- 0
+indexs <- which(loan_data$Dependents == 2)
+loan_data$Dependents[indexs] <- 1
+indexs <- which(loan_data$Dependents == 3)
+loan_data$Dependents[indexs] <- 2
+indexs <- which(loan_data$Dependents == 4)
+loan_data$Dependents[indexs] <- 3
+
+loan_data$Education <- ifelse(loan_data$Education == "Graduate",1,0)
+loan_data$Self_Employed <- ifelse(loan_data$Self_Employed == "Yes",1,0)
+loan_data$LoanAmount <- (loan_data$LoanAmount - min(loan_data$LoanAmount)) / 
+                      (max(loan_data$LoanAmount) - min(loan_data$LoanAmount))
+loan_data$Loan_Amount_Term<-as.numeric(as.character(loan_data$Loan_Amount_Term))
+loan_data$Loan_Amount_Term <- (loan_data$Loan_Amount_Term - 
+          min(loan_data$Loan_Amount_Term)) / (max(loan_data$Loan_Amount_Term) - 
+          min(loan_data$Loan_Amount_Term))
+loan_data$Credit_History <- as.numeric(as.character(loan_data$Credit_History))
+
+levels(loan_data$Property_Area)
+loan_data$Property_Area <- as.character(loan_data$Property_Area)
+indexs <- which(loan_data$Property_Area == "Rural")
+loan_data$Property_Area[indexs] <- 0
+indexs <- which(loan_data$Property_Area == "Semiurban")
+loan_data$Property_Area[indexs] <- 1
+indexs <- which(loan_data$Property_Area == "Urban")
+loan_data$Property_Area[indexs] <- 2
+loan_data$Property_Area <- as.numeric(loan_data$Property_Area)
+```
+
+```{r,message=FALSE, warning=FALSE}
+
+head(loan_data,7)
+
+```
+
+# Modeling approach
+
+For this project I will use 6 machine learning algorithms:
+
+* k-nearest neighbors
+* Generalized Linear Model
+* Quadratic Discriminant Analysis
+* Linear discriminant analysis
+* Decision Trees
+* Random forest
+
+Splitting the loan_data in train data and test data:
+
+```{r,message=FALSE, warning=FALSE}
+
+set.seed(1)
+index <- createDataPartition(loan_data$Loan_Status,times = 1,p = 0.8, 
+                             list = FALSE)
+loan_data_train <- loan_data[index,]
+loan_data_test <-loan_data[-index,]
+
+```
+
+## K-nearest neighbors
+
+```{r,message=FALSE, warning=FALSE}
+
+control <- trainControl(method = "cv", number = 10, p = .9)
+train_knn <- train(Loan_Status ~ ., method = "knn", data = loan_data_train, 
+                   tuneGrid = data.frame(k = seq(9, 71, 2)),trControl = control)
+ggplot(train_knn, highlight = TRUE)
+train_knn$bestTune
+pred_LoanStatus_knn <- predict(train_knn,loan_data_test)
+
+```
+
+Accuracy of the model:
+
+```{r,message=FALSE, warning=FALSE}
+
+knn_accuracy <- confusionMatrix(pred_LoanStatus_knn,loan_data_test$Loan_Status)$
+                                                          overall["Accuracy"]
+knn_accuracy
+```
+
+## Generalized Linear Model
+
+```{r,message=FALSE, warning=FALSE}
+
+train_glm <- train(Loan_Status ~ ., method = "glm", data = loan_data_train)
+pred_LoanStatus_glm <- predict(train_glm,loan_data_test)
+
+```
+
+Accuracy of the model:
+
+```{r,message=FALSE, warning=FALSE}
+
+glm_accuracy <- confusionMatrix(pred_LoanStatus_glm,loan_data_test$Loan_Status)$
+                                                          overall["Accuracy"]
+glm_accuracy
+```
+
+## Quadratic Discriminant Analysis
+
+```{r,message=FALSE, warning=FALSE}
+train_qda <- train(Loan_Status ~ ., method = "qda", data = loan_data_train)
+pred_LoanStatus_qda <- predict(train_qda,loan_data_test)
+```
+
+Accuracy of the model:
+
+```{r,message=FALSE, warning=FALSE}
+qda_accuracy <- confusionMatrix(pred_LoanStatus_qda,loan_data_test$Loan_Status)$
+                                                          overall["Accuracy"]
+qda_accuracy
+```
+
+## Linear discriminant analysis
+
+```{r,message=FALSE, warning=FALSE}
+train_lda <- train(Loan_Status ~ ., method = "lda", data = loan_data_train)
+pred_LoanStatus_lda <- predict(train_lda,loan_data_test)
+```
+
+Accuracy of the model:
+
+```{r,message=FALSE, warning=FALSE}
+lda_accuracy <- confusionMatrix(pred_LoanStatus_lda,loan_data_test$Loan_Status)$
+                                                      overall["Accuracy"]
+lda_accuracy
+```
+
+## Decision Trees
+
+```{r,message=FALSE, warning=FALSE}
+train_rpart <- train(Loan_Status ~ ., method = "rpart",data = loan_data_train)
+pred_LoanStatus_rpart <- predict(train_rpart,loan_data_test)
+```
+
+Accuracy of the model:
+
+```{r,message=FALSE, warning=FALSE}
+rpart_accuracy <- confusionMatrix(pred_LoanStatus_rpart,loan_data_test$
+                                          Loan_Status)$overall["Accuracy"]
+rpart_accuracy
+
+```
+
+## Random forest
+
+```{r,message=FALSE, warning=FALSE}
+train_rf <- train(Loan_Status ~ ., method = "rf", data = loan_data_train)
+pred_LoanStatus_rf <- predict(train_rf,loan_data_test)
+```
+
+Accuracy of the model:
+
+```{r,message=FALSE, warning=FALSE}
+rf_accuracy <- confusionMatrix(pred_LoanStatus_rf,loan_data_test$Loan_Status)$
+                                                        overall["Accuracy"]
+rf_accuracy
+```
+# Models performance
+
+```{r,message=FALSE, warning=FALSE}
+model <- rep(0,6)
+accuracy <- rep(0,6)
+accuracy_summary <- data.frame(model, accuracy)
+accuracy_summary$model[1] <- "knn"
+accuracy_summary$accuracy[1] <- round(knn_accuracy,4)
+accuracy_summary$model[2] <- "glm"
+accuracy_summary$accuracy[2] <- round(glm_accuracy,4)
+accuracy_summary$model[3] <- "qda"
+accuracy_summary$accuracy[3] <- round(qda_accuracy,4)
+accuracy_summary$model[4] <- "lda"
+accuracy_summary$accuracy[4] <- round(lda_accuracy,4)
+accuracy_summary$model[5] <- "rpart"
+accuracy_summary$accuracy[5] <- round(rpart_accuracy,4)
+accuracy_summary$model[6] <- "rf"
+accuracy_summary$accuracy[6] <- round(rf_accuracy,4)
+
+accuracy_summary %>% ggplot(aes(x = model,y = accuracy)) +
+  geom_bar(stat = "identity") + scale_y_continuous(limits=c(0.7,0.9),oob =
+              rescale_none) + geom_text(aes(label = accuracy), vjust = -1)
+
+```
+
+# Conclusions
+
+We can see that the most accurate models for our dataset is GLM, LDA and LPART with an accuracy of 0.8349.
+
